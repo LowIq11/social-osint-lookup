@@ -14,6 +14,8 @@ from social_osint_lookup.http_client import (
     apply_extended_fields,
     base_result,
     fetch_html,
+    redact_secrets,
+    resolve_tiktok_session_cookie,
     unix_to_iso,
 )
 
@@ -168,6 +170,86 @@ def _extract_username_history(user: dict[str, Any]) -> list[dict[str, Any]] | No
     return out or None
 
 
+
+def _extract_display_name_history(user: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Prior nicknames only if a real list/field exists in the public payload.
+
+    Each entry is {display_name, changed_at, location_at_change}. Never invents
+    history from nickNameModifyTime alone (that is last-change time only).
+    """
+    current = user.get("nickname") or user.get("nickName")
+    out: list[dict[str, Any]] = []
+
+    def _append(name: Any, changed_at: Any = None, loc: Any = None) -> None:
+        if not isinstance(name, str) or not name.strip():
+            return
+        name = name.strip()
+        if isinstance(current, str) and name == current:
+            return
+        if any(e["display_name"] == name for e in out):
+            return
+        if isinstance(changed_at, (int, float)) or (
+            isinstance(changed_at, str) and changed_at.isdigit()
+        ):
+            changed_iso = unix_to_iso(changed_at)
+        elif isinstance(changed_at, str) and changed_at.strip():
+            changed_iso = changed_at.strip()
+        else:
+            changed_iso = None
+        loc_str = loc.strip() if isinstance(loc, str) and loc.strip() else None
+        out.append(
+            {
+                "display_name": name,
+                "changed_at": changed_iso,
+                "location_at_change": loc_str,
+            }
+        )
+
+    for key in (
+        "nickNameHistory",
+        "nicknameHistory",
+        "previousNicknames",
+        "displayNameHistory",
+        "nicknames",
+    ):
+        val = user.get(key)
+        if isinstance(val, list) and val:
+            for item in val:
+                if isinstance(item, str):
+                    _append(item)
+                elif isinstance(item, dict):
+                    nm = (
+                        item.get("nickname")
+                        or item.get("nickName")
+                        or item.get("displayName")
+                        or item.get("value")
+                        or item.get("name")
+                    )
+                    _append(
+                        nm,
+                        changed_at=item.get("changedAt")
+                        or item.get("changeTime")
+                        or item.get("createTime")
+                        or item.get("timestamp")
+                        or item.get("nickNameModifyTime"),
+                        loc=item.get("location")
+                        or item.get("region")
+                        or item.get("location_at_change"),
+                    )
+            break
+
+    if not out:
+        prev = (
+            user.get("previousNickname")
+            or user.get("oldNickname")
+            or user.get("previousNickName")
+        )
+        if isinstance(prev, str) and prev.strip():
+            _append(prev)
+
+    return out or None
+
+
 def _extract_creator_level(user: dict[str, Any], user_info: dict[str, Any] | None = None) -> str | None:
     """
     Creator/support/engagement badge if present in public JSON.
@@ -225,13 +307,42 @@ def _extended_from_user(
     user: dict[str, Any], *, user_info: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     location = _extract_location(user)
+    # location_at_creation: only if a dedicated public field exists — never
+    # invent from language= or current region alone.
+    location_at_creation = None
+    for key in (
+        "createRegion",
+        "creationRegion",
+        "regionAtCreation",
+        "accountCreateRegion",
+        "registerRegion",
+        "locationAtCreation",
+    ):
+        val = user.get(key)
+        if isinstance(val, str) and val.strip():
+            location_at_creation = val.strip()
+            break
     created = unix_to_iso(user.get("createTime") or user.get("create_time"))
     history = _extract_username_history(user)
+    display_history = _extract_display_name_history(user)
+    # Last-modify timestamps only (NOT full history of prior values).
+    username_last_changed_at = unix_to_iso(
+        user.get("uniqueIdModifyTime") or user.get("unique_id_modify_time")
+    )
+    display_name_last_changed_at = unix_to_iso(
+        user.get("nickNameModifyTime")
+        or user.get("nicknameModifyTime")
+        or user.get("nick_name_modify_time")
+    )
     creator_level = _extract_creator_level(user, user_info)
     return {
         "location": location,
+        "location_at_creation": location_at_creation,
         "account_created_at": created,
         "username_history": history,
+        "display_name_history": display_history,
+        "username_last_changed_at": username_last_changed_at,
+        "display_name_last_changed_at": display_name_last_changed_at,
         "tiktok_creator_level": creator_level,
     }
 
@@ -355,8 +466,12 @@ def _from_meta(html: str, username: str) -> dict[str, Any]:
         "profile_url": profile_url_for(username),
         "parse_method": "meta_tags",
         "location": None,
+        "location_at_creation": None,
         "account_created_at": None,
         "username_history": None,
+        "display_name_history": None,
+        "username_last_changed_at": None,
+        "display_name_last_changed_at": None,
         "tiktok_creator_level": None,
     }
 
@@ -378,18 +493,33 @@ def parse_profile_html(html: str, *, username_hint: str | None = None) -> dict[s
     return _from_meta(html, username_hint or "")
 
 
-def lookup(username_or_url: str, *, session=None, timeout: float = 25.0) -> dict[str, Any]:
+def lookup(
+    username_or_url: str,
+    *,
+    session=None,
+    timeout: float = 25.0,
+    session_cookie: str | None = None,
+) -> dict[str, Any]:
     """
-    Look up a public TikTok profile.
+    Look up a TikTok profile from public HTML (optionally with a session cookie).
 
-    Returns public fields only: username, display name, bio, follower/following/likes
-    counts when present in page JSON, profile URL, id if public, plus extended
-    public fields (location/region, createTime, creator level) when present.
+    Without a cookie: unauthenticated public scrape only.
+    With ``session_cookie`` or env ``TIKTOK_SESSION_COOKIE``: Cookie header is
+    attached so richer fields may appear in the same rehydration JSON when TikTok
+    exposes them to logged-in browsers. The cookie is never logged, printed, or
+    written to disk by this library.
+
+    Always returns last-modify timestamps (uniqueIdModifyTime / nickNameModifyTime)
+    when present; full history arrays only when actually in the payload.
     """
     username = normalize_username(username_or_url)
     url = profile_url_for(username)
     result = base_result("tiktok", username_or_url, profile_url=url)
     result["fetched_at"] = datetime.now(timezone.utc).isoformat()
+
+    cookie = resolve_tiktok_session_cookie(session_cookie)
+    result["auth_mode"] = "session_cookie" if cookie else "public"
+    # Never put the cookie (or any secret) on the result dict.
 
     try:
         html, resp = fetch_html(
@@ -397,17 +527,18 @@ def lookup(username_or_url: str, *, session=None, timeout: float = 25.0) -> dict
             session=session,
             timeout=timeout,
             referer="https://www.tiktok.com/",
+            cookie=cookie,
         )
         result["http_status"] = resp.status_code
         result["final_url"] = str(resp.url)
     except Exception as exc:  # noqa: BLE001
-        result["error"] = f"fetch failed: {exc}"
+        result["error"] = f"fetch failed: {redact_secrets(str(exc), cookie, session_cookie)}"
         return result
 
     try:
         parsed = parse_profile_html(html, username_hint=username)
     except Exception as exc:  # noqa: BLE001
-        result["error"] = f"parse failed: {exc}"
+        result["error"] = f"parse failed: {redact_secrets(str(exc), cookie, session_cookie)}"
         return result
 
     # Detect empty / not found pages
@@ -417,8 +548,12 @@ def lookup(username_or_url: str, *, session=None, timeout: float = 25.0) -> dict
         apply_extended_fields(
             result,
             location=parsed.get("location"),
+            location_at_creation=parsed.get("location_at_creation"),
             account_created_at=parsed.get("account_created_at"),
             username_history=parsed.get("username_history"),
+            display_name_history=parsed.get("display_name_history"),
+            username_last_changed_at=parsed.get("username_last_changed_at"),
+            display_name_last_changed_at=parsed.get("display_name_last_changed_at"),
             tiktok_creator_level=parsed.get("tiktok_creator_level"),
             platform="tiktok",
         )
@@ -429,8 +564,12 @@ def lookup(username_or_url: str, *, session=None, timeout: float = 25.0) -> dict
     apply_extended_fields(
         result,
         location=parsed.get("location"),
+        location_at_creation=parsed.get("location_at_creation"),
         account_created_at=parsed.get("account_created_at"),
         username_history=parsed.get("username_history"),
+        display_name_history=parsed.get("display_name_history"),
+        username_last_changed_at=parsed.get("username_last_changed_at"),
+        display_name_last_changed_at=parsed.get("display_name_last_changed_at"),
         tiktok_creator_level=parsed.get("tiktok_creator_level"),
         platform="tiktok",
     )

@@ -12,6 +12,7 @@ def to_json(data: Any) -> str:
 
 _LABELS = [
     ("platform", "Platform"),
+    ("auth_mode", "Auth mode"),
     ("found", "Found"),
     ("username", "Username"),
     ("display_name", "Display name"),
@@ -21,8 +22,12 @@ _LABELS = [
     ("about", "About"),
     ("external_url", "External URL"),
     ("location", "Location"),
+    ("location_at_creation", "Location at creation"),
     ("account_created_at", "Created at"),
     ("username_history", "Username history"),
+    ("display_name_history", "Display name history"),
+    ("username_last_changed_at", "Username last changed"),
+    ("display_name_last_changed_at", "Display name last changed"),
     ("tiktok_creator_level", "TikTok creator level"),
     ("verified", "Verified"),
     ("private", "Private"),
@@ -51,7 +56,7 @@ def _fmt_history(val: Any) -> str:
     parts = []
     for item in val:
         if isinstance(item, dict):
-            u = item.get("username", "?")
+            u = item.get("username") or item.get("display_name") or "?"
             ca = item.get("changed_at") or "—"
             loc = item.get("location_at_change") or "—"
             parts.append(f"{u} (changed_at={ca}, location_at_change={loc})")
@@ -72,7 +77,7 @@ def to_pretty(data: dict[str, Any]) -> str:
             continue
         if key == "found":
             val = "yes" if val else "no"
-        elif key == "username_history":
+        elif key in ("username_history", "display_name_history"):
             val = _fmt_history(val)
         elif key == "field_availability" and isinstance(val, dict):
             val = ", ".join(f"{k}={v}" for k, v in val.items())

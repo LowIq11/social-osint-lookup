@@ -12,9 +12,11 @@ from social_osint_lookup.formatters import to_json, to_pretty
 from social_osint_lookup.platforms import PLATFORMS
 
 
-def _lookup(platform: str, target: str) -> dict:
+def _lookup(platform: str, target: str, *, session_cookie: str | None = None) -> dict:
     key = "x" if platform == "twitter" else platform
     mod = PLATFORMS[key]
+    if key == "tiktok":
+        return mod.lookup(target, session_cookie=session_cookie)
     return mod.lookup(target)
 
 
@@ -34,13 +36,41 @@ def _emit(data: dict | list, *, fmt: str, output: str | None) -> None:
         click.echo(text, nl=False)
 
 
+def _tiktok_cookie_options(func):
+    """Shared Click options for optional TikTok session cookie (never echoed)."""
+    func = click.option(
+        "--session-cookie",
+        "session_cookie",
+        default=None,
+        hide_input=True,
+        help=(
+            "Optional TikTok session cookie (sessionid=... or raw Cookie string). "
+            "Prefer env TIKTOK_SESSION_COOKIE. Never logged or written to disk."
+        ),
+    )(func)
+    func = click.option(
+        "--tiktok-session-cookie",
+        "session_cookie_alias",
+        default=None,
+        hide_input=True,
+        help="Alias for --session-cookie.",
+    )(func)
+    return func
+
+
+def _resolve_cli_cookie(session_cookie: str | None, session_cookie_alias: str | None) -> str | None:
+    # Prefer explicit --session-cookie over alias; env resolved inside tiktok.lookup
+    return session_cookie or session_cookie_alias
+
+
 @click.group()
 @click.version_option(__version__, prog_name="social-osint-lookup")
 def main() -> None:
     """Public-profile OSINT lookup for TikTok, Instagram, and X (Twitter).
 
-    Educational / research use only. Public pages only — no login bypass,
-    no private data, no credential stuffing.
+    Educational / research use only. Default mode uses public pages only.
+    Optional TikTok session cookie (your own browser cookie) may unlock richer
+    fields — never share that cookie in chat; set TIKTOK_SESSION_COOKIE locally.
     """
 
 
@@ -63,15 +93,26 @@ def main() -> None:
     show_default=True,
 )
 @click.option("-o", "--output", type=click.Path(dir_okay=False), default=None)
-def cmd_lookup(target: str, platform: str, fmt: str, output: str | None) -> None:
+@_tiktok_cookie_options
+def cmd_lookup(
+    target: str,
+    platform: str,
+    fmt: str,
+    output: str | None,
+    session_cookie: str | None,
+    session_cookie_alias: str | None,
+) -> None:
     """Look up public profile info for TARGET (username or profile URL)."""
     platform = platform.lower()
+    cookie = _resolve_cli_cookie(session_cookie, session_cookie_alias)
     try:
         if platform == "all":
             results = []
             for name in ("tiktok", "instagram", "x"):
                 try:
-                    results.append(_lookup(name, target))
+                    results.append(
+                        _lookup(name, target, session_cookie=cookie if name == "tiktok" else None)
+                    )
                 except ValueError as exc:
                     results.append(
                         {
@@ -83,11 +124,16 @@ def cmd_lookup(target: str, platform: str, fmt: str, output: str | None) -> None
                     )
             _emit(results, fmt=fmt, output=output)
         else:
-            result = _lookup(platform, target)
+            result = _lookup(
+                platform,
+                target,
+                session_cookie=cookie if platform in ("tiktok",) else None,
+            )
             _emit(result, fmt=fmt, output=output)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
+        # Never include cookie material in CLI errors
         raise click.ClickException(f"lookup failed: {exc}") from exc
 
 
@@ -95,10 +141,25 @@ def cmd_lookup(target: str, platform: str, fmt: str, output: str | None) -> None
 @click.argument("target")
 @click.option("-f", "--format", "fmt", type=click.Choice(["pretty", "json"]), default="pretty")
 @click.option("-o", "--output", type=click.Path(dir_okay=False), default=None)
-def cmd_tiktok(target: str, fmt: str, output: str | None) -> None:
-    """Look up a public TikTok profile."""
+@_tiktok_cookie_options
+def cmd_tiktok(
+    target: str,
+    fmt: str,
+    output: str | None,
+    session_cookie: str | None,
+    session_cookie_alias: str | None,
+) -> None:
+    """Look up a TikTok profile (public, or optional session cookie)."""
     try:
-        _emit(_lookup("tiktok", target), fmt=fmt, output=output)
+        _emit(
+            _lookup(
+                "tiktok",
+                target,
+                session_cookie=_resolve_cli_cookie(session_cookie, session_cookie_alias),
+            ),
+            fmt=fmt,
+            output=output,
+        )
     except Exception as exc:  # noqa: BLE001
         raise click.ClickException(str(exc)) from exc
 
@@ -143,12 +204,15 @@ def cmd_twitter(target: str, fmt: str, output: str | None) -> None:
 def cmd_platforms() -> None:
     """List supported platforms and what each covers."""
     click.echo(
-        """Supported platforms (public pages only):
+        """Supported platforms (public pages only by default):
 
   tiktok     username/URL → display name, bio, follower/following/likes,
-             video count, verified/private, user id, region/location,
-             createTime, creator level when present, profile URL
-             (via __UNIVERSAL_DATA_FOR_REHYDRATION__ / SIGI_STATE / meta)
+             video count, verified/private, user id, region/location when
+             public, createTime, uniqueIdModifyTime / nickNameModifyTime
+             (last-change only), creator level when present, profile URL.
+             Optional: TIKTOK_SESSION_COOKIE / --session-cookie may expose
+             richer history fields when TikTok includes them for logged-in
+             browsers (never paste cookie into chat).
 
   instagram  username/URL → display name, bio, follower/following/posts,
              verified/private when public, rare city/business location,
