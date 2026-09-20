@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
-from social_osint_lookup.http_client import base_result, fetch_html
+from social_osint_lookup.http_client import apply_extended_fields, base_result, fetch_html
 
 SHARED_DATA_RE = re.compile(
     r"window\._sharedData\s*=\s*(\{.+?\});\s*</script>",
@@ -72,6 +72,48 @@ def _parse_count(text: str | None) -> int | None:
         return None
 
 
+def _extract_location(user: dict[str, Any]) -> str | None:
+    """Rare public location hints from sharedData (city / business address)."""
+    for key in ("city_name", "cityName", "public_email_location"):
+        val = user.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    addr = user.get("business_address_json") or user.get("business_address")
+    if isinstance(addr, str) and addr.strip():
+        try:
+            parsed = json.loads(addr)
+        except json.JSONDecodeError:
+            return addr.strip()
+        if isinstance(parsed, dict):
+            parts = [
+                parsed.get(k)
+                for k in ("city_name", "city", "region", "country_code", "country")
+                if isinstance(parsed.get(k), str) and parsed.get(k).strip()
+            ]
+            if parts:
+                return ", ".join(parts)
+        return None
+    if isinstance(addr, dict):
+        parts = [
+            addr.get(k)
+            for k in ("city_name", "city", "region", "country_code", "country")
+            if isinstance(addr.get(k), str) and addr.get(k).strip()
+        ]
+        if parts:
+            return ", ".join(parts)
+    return None
+
+
+def _extended_nulls(*, location: str | None = None) -> dict[str, Any]:
+    """Instagram: join date / username history not on public profile page."""
+    return {
+        "location": location,
+        "account_created_at": None,
+        "username_history": None,
+        "tiktok_creator_level": None,
+    }
+
+
 def _from_shared_data(data: dict[str, Any]) -> dict[str, Any] | None:
     entry = (
         ((data.get("entry_data") or {}).get("ProfilePage") or [None])[0]
@@ -94,7 +136,7 @@ def _map_user(user: dict[str, Any], *, parse_method: str) -> dict[str, Any]:
     edge_follow = user.get("edge_follow") or {}
     edge_media = user.get("edge_owner_to_timeline_media") or {}
     username = user.get("username")
-    return {
+    out = {
         "username": username,
         "display_name": user.get("full_name") or None,
         "user_id": str(user["id"]) if user.get("id") is not None else None,
@@ -110,6 +152,8 @@ def _map_user(user: dict[str, Any], *, parse_method: str) -> dict[str, Any]:
         "profile_url": f"https://www.instagram.com/{username}/" if username else None,
         "parse_method": parse_method,
     }
+    out.update(_extended_nulls(location=_extract_location(user)))
+    return out
 
 
 def _from_meta(html: str, username: str) -> dict[str, Any]:
@@ -143,6 +187,7 @@ def _from_meta(html: str, username: str) -> dict[str, Any]:
 
     # ld+json Person / ProfilePage
     verified = None
+    location = None
     for script in soup.find_all("script", type="application/ld+json"):
         try:
             ld = json.loads(script.string or "")
@@ -157,8 +202,15 @@ def _from_meta(html: str, username: str) -> dict[str, Any]:
                     display_name = node.get("name")
                 if node.get("description") and not bio:
                     bio = node.get("description")
+                loc = node.get("address") or node.get("location") or node.get("contentLocation")
+                if isinstance(loc, str) and loc.strip():
+                    location = loc.strip()
+                elif isinstance(loc, dict):
+                    name = loc.get("name") or loc.get("addressLocality") or loc.get("addressRegion")
+                    if isinstance(name, str) and name.strip():
+                        location = name.strip()
 
-    return {
+    out = {
         "username": username,
         "display_name": display_name,
         "user_id": None,
@@ -174,6 +226,8 @@ def _from_meta(html: str, username: str) -> dict[str, Any]:
         "profile_url": profile_url_for(username),
         "parse_method": "meta_tags",
     }
+    out.update(_extended_nulls(location=location))
+    return out
 
 
 def _try_json_blobs(html: str) -> dict[str, Any] | None:
@@ -220,7 +274,8 @@ def lookup(username_or_url: str, *, session=None, timeout: float = 25.0) -> dict
 
     Returns public fields only: display name, bio, follower/following/post counts
     when available from public page metadata, profile URL, verified/private flags
-    if exposed publicly.
+    if exposed publicly. Join date and username history are typically unavailable
+    from the public profile page (returned as null).
     """
     username = normalize_username(username_or_url)
     url = profile_url_for(username)
@@ -257,9 +312,25 @@ def lookup(username_or_url: str, *, session=None, timeout: float = 25.0) -> dict
         if "sorry" in lower or "page isn't available" in lower or "page not found" in lower:
             result["error"] = "profile not found or unavailable"
             result.update(parsed)
+            apply_extended_fields(
+                result,
+                location=parsed.get("location"),
+                account_created_at=None,
+                username_history=None,
+                tiktok_creator_level=None,
+                platform="instagram",
+            )
             return result
 
     result["found"] = True
     result.update(parsed)
+    apply_extended_fields(
+        result,
+        location=parsed.get("location"),
+        account_created_at=parsed.get("account_created_at"),
+        username_history=parsed.get("username_history"),
+        tiktok_creator_level=None,
+        platform="instagram",
+    )
     result["error"] = None
     return result

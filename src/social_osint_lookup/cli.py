@@ -13,7 +13,8 @@ from social_osint_lookup.platforms import PLATFORMS
 
 
 def _lookup(platform: str, target: str) -> dict:
-    mod = PLATFORMS[platform]
+    key = "x" if platform == "twitter" else platform
+    mod = PLATFORMS[key]
     return mod.lookup(target)
 
 
@@ -36,7 +37,7 @@ def _emit(data: dict | list, *, fmt: str, output: str | None) -> None:
 @click.group()
 @click.version_option(__version__, prog_name="social-osint-lookup")
 def main() -> None:
-    """Public-profile OSINT lookup for TikTok, Instagram, and Facebook.
+    """Public-profile OSINT lookup for TikTok, Instagram, and X (Twitter).
 
     Educational / research use only. Public pages only — no login bypass,
     no private data, no credential stuffing.
@@ -48,7 +49,7 @@ def main() -> None:
 @click.option(
     "-p",
     "--platform",
-    type=click.Choice(["tiktok", "instagram", "facebook", "all"], case_sensitive=False),
+    type=click.Choice(["tiktok", "instagram", "x", "twitter", "all"], case_sensitive=False),
     default="all",
     show_default=True,
     help="Platform to query (or all three).",
@@ -68,7 +69,7 @@ def cmd_lookup(target: str, platform: str, fmt: str, output: str | None) -> None
     try:
         if platform == "all":
             results = []
-            for name in ("tiktok", "instagram", "facebook"):
+            for name in ("tiktok", "instagram", "x"):
                 try:
                     results.append(_lookup(name, target))
                 except ValueError as exc:
@@ -114,14 +115,26 @@ def cmd_instagram(target: str, fmt: str, output: str | None) -> None:
         raise click.ClickException(str(exc)) from exc
 
 
-@main.command("facebook")
+@main.command("x")
 @click.argument("target")
 @click.option("-f", "--format", "fmt", type=click.Choice(["pretty", "json"]), default="pretty")
 @click.option("-o", "--output", type=click.Path(dir_okay=False), default=None)
-def cmd_facebook(target: str, fmt: str, output: str | None) -> None:
-    """Look up a public Facebook profile or page."""
+def cmd_x(target: str, fmt: str, output: str | None) -> None:
+    """Look up a public X (Twitter) profile."""
     try:
-        _emit(_lookup("facebook", target), fmt=fmt, output=output)
+        _emit(_lookup("x", target), fmt=fmt, output=output)
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(str(exc)) from exc
+
+
+@main.command("twitter")
+@click.argument("target")
+@click.option("-f", "--format", "fmt", type=click.Choice(["pretty", "json"]), default="pretty")
+@click.option("-o", "--output", type=click.Path(dir_okay=False), default=None)
+def cmd_twitter(target: str, fmt: str, output: str | None) -> None:
+    """Alias for `x` — look up a public X (Twitter) profile."""
+    try:
+        _emit(_lookup("x", target), fmt=fmt, output=output)
     except Exception as exc:  # noqa: BLE001
         raise click.ClickException(str(exc)) from exc
 
@@ -133,16 +146,20 @@ def cmd_platforms() -> None:
         """Supported platforms (public pages only):
 
   tiktok     username/URL → display name, bio, follower/following/likes,
-             video count, verified/private, user id, profile URL
+             video count, verified/private, user id, region/location,
+             createTime, creator level when present, profile URL
              (via __UNIVERSAL_DATA_FOR_REHYDRATION__ / SIGI_STATE / meta)
 
   instagram  username/URL → display name, bio, follower/following/posts,
-             verified/private when public, profile URL
+             verified/private when public, rare city/business location,
+             profile URL (join date / username history unavailable publicly)
              (via _sharedData / og:description meta)
 
-  facebook   username/slug/URL → public name, about snippet, entity type
-             (page vs profile when detectable), profile URL
-             (via Open Graph / ld+json meta)
+  x          username/URL → display name, bio, follower/following,
+             verified, location, join date when public, profile URL
+             (username history unavailable from public endpoints)
+             (via __NEXT_DATA__ / og meta / syndication)
+             alias: twitter
 """
     )
 

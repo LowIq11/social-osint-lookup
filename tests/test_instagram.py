@@ -24,6 +24,10 @@ def test_parse_shared_data(instagram_html: str):
     assert parsed["verified"] is False
     assert parsed["private"] is False
     assert parsed["parse_method"] == "shared_data"
+    assert parsed["location"] is None
+    assert parsed["account_created_at"] is None
+    assert parsed["username_history"] is None
+    assert parsed["tiktok_creator_level"] is None
 
 
 def test_parse_meta_only_counts():
@@ -41,6 +45,7 @@ def test_parse_meta_only_counts():
     assert parsed["post_count"] == 3
     assert parsed["parse_method"] == "meta_tags"
     assert "Hello world" in (parsed["bio"] or "")
+    assert parsed["username_history"] is None
 
 
 def test_lookup_mocked(instagram_html: str):
@@ -59,3 +64,9 @@ def test_lookup_mocked(instagram_html: str):
     assert result["username"] == "demo_ig"
     assert result["follower_count"] == 1234
     assert result["error"] is None
+    assert result["account_created_at"] is None
+    assert result["username_history"] is None
+    assert result["tiktok_creator_level"] is None
+    assert result["field_availability"]["account_created_at"] == "unavailable"
+    assert result["field_availability"]["username_history"] == "unavailable"
+    assert result["field_availability"]["tiktok_creator_level"] == "n/a"

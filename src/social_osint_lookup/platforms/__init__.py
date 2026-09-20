@@ -1,11 +1,12 @@
 """Platform-specific public profile lookup modules."""
 
-from social_osint_lookup.platforms import facebook, instagram, tiktok
+from social_osint_lookup.platforms import instagram, tiktok, x
 
 PLATFORMS = {
     "tiktok": tiktok,
     "instagram": instagram,
-    "facebook": facebook,
+    "x": x,
+    "twitter": x,  # alias
 }
 
-__all__ = ["PLATFORMS", "tiktok", "instagram", "facebook"]
+__all__ = ["PLATFORMS", "tiktok", "instagram", "x"]

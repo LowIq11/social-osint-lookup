@@ -10,7 +10,12 @@ from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
-from social_osint_lookup.http_client import base_result, fetch_html
+from social_osint_lookup.http_client import (
+    apply_extended_fields,
+    base_result,
+    fetch_html,
+    unix_to_iso,
+)
 
 REHYDRATION_RE = re.compile(
     r'<script[^>]+id=["\']__UNIVERSAL_DATA_FOR_REHYDRATION__["\'][^>]*>(.*?)</script>',
@@ -65,6 +70,157 @@ def _extract_json_script(html: str, pattern: re.Pattern[str]) -> dict[str, Any] 
     return data if isinstance(data, dict) else None
 
 
+def _extract_location(user: dict[str, Any]) -> str | None:
+    """Prefer human-readable region/location keys when present in public JSON."""
+    for key in ("region", "location", "isoCountryCode", "country", "storeRegion"):
+        val = user.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return None
+
+
+def _history_entry(
+    username: str,
+    *,
+    changed_at: Any = None,
+    location_at_change: Any = None,
+) -> dict[str, Any]:
+    return {
+        "username": username,
+        "changed_at": unix_to_iso(changed_at) if changed_at is not None and not isinstance(changed_at, str)
+        else (changed_at if isinstance(changed_at, str) and changed_at.strip() else unix_to_iso(changed_at) if changed_at is not None else None),
+        "location_at_change": location_at_change.strip()
+        if isinstance(location_at_change, str) and location_at_change.strip()
+        else None,
+    }
+
+
+def _extract_username_history(user: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Prior uniqueIds only if a real list/field exists in the public payload.
+
+    Each entry is {username, changed_at, location_at_change}. Timestamps/locations
+    are filled only when present in the public JSON — never invented.
+    """
+    current = user.get("uniqueId")
+    out: list[dict[str, Any]] = []
+
+    def _append(uname: Any, changed_at: Any = None, loc: Any = None) -> None:
+        if not isinstance(uname, str) or not uname.strip():
+            return
+        uname = uname.strip()
+        if isinstance(current, str) and uname == current:
+            return
+        if any(e["username"] == uname for e in out):
+            return
+        # Normalize changed_at
+        if isinstance(changed_at, (int, float)) or (isinstance(changed_at, str) and changed_at.isdigit()):
+            changed_iso = unix_to_iso(changed_at)
+        elif isinstance(changed_at, str) and changed_at.strip():
+            changed_iso = changed_at.strip()
+        else:
+            changed_iso = None
+        loc_str = loc.strip() if isinstance(loc, str) and loc.strip() else None
+        out.append(
+            {
+                "username": uname,
+                "changed_at": changed_iso,
+                "location_at_change": loc_str,
+            }
+        )
+
+    for key in ("uniqueIdHistory", "uniqueIdHistories", "previousUniqueIds", "nicknames"):
+        val = user.get(key)
+        if isinstance(val, list) and val:
+            for item in val:
+                if isinstance(item, str):
+                    _append(item)
+                elif isinstance(item, dict):
+                    uid = item.get("uniqueId") or item.get("nickname") or item.get("value") or item.get("username")
+                    _append(
+                        uid,
+                        changed_at=item.get("changedAt")
+                        or item.get("changeTime")
+                        or item.get("createTime")
+                        or item.get("timestamp"),
+                        loc=item.get("location")
+                        or item.get("region")
+                        or item.get("location_at_change"),
+                    )
+            break
+
+    if not out:
+        prev = user.get("previousUniqueId") or user.get("oldUniqueId")
+        if isinstance(prev, str) and prev.strip():
+            _append(prev)
+
+    return out or None
+
+
+def _extract_creator_level(user: dict[str, Any], user_info: dict[str, Any] | None = None) -> str | None:
+    """
+    Creator/support/engagement badge if present in public JSON.
+
+    Never invents values — only returns strings found under known keys.
+    """
+    scopes: list[dict[str, Any]] = [user]
+    if isinstance(user_info, dict):
+        scopes.append(user_info)
+        commerce = user_info.get("commerceUserInfo") or user.get("commerceUserInfo")
+        if isinstance(commerce, dict):
+            scopes.append(commerce)
+        analytics = user_info.get("analytics") or user.get("analytics")
+        if isinstance(analytics, dict):
+            scopes.append(analytics)
+
+    for scope in scopes:
+        for key in (
+            "creatorLevel",
+            "supportLevel",
+            "creator_level",
+            "support_level",
+            "engagementLevel",
+            "badgeLevel",
+            "level",
+        ):
+            val = scope.get(key)
+            if isinstance(val, (str, int, float)) and str(val).strip() != "":
+                # Avoid generic numeric "level" that is not clearly a creator badge
+                if key == "level" and not any(
+                    k in scope for k in ("creatorLevel", "supportLevel", "commerceUserInfo")
+                ):
+                    # Only accept bare "level" when sibling badge context exists
+                    if "creator" not in str(scope.keys()).lower() and "support" not in str(
+                        scope.keys()
+                    ).lower():
+                        continue
+                return str(val).strip()
+        # commerce category / badge label strings
+        for key in ("category", "badgeName", "badge", "label"):
+            val = scope.get(key)
+            if isinstance(val, str) and val.strip() and key != "category":
+                return val.strip()
+            if key == "category" and isinstance(val, str) and val.strip():
+                # Only treat as creator level when under commerceUserInfo
+                if scope is not user:
+                    return val.strip()
+    return None
+
+
+def _extended_from_user(
+    user: dict[str, Any], *, user_info: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    location = _extract_location(user)
+    created = unix_to_iso(user.get("createTime") or user.get("create_time"))
+    history = _extract_username_history(user)
+    creator_level = _extract_creator_level(user, user_info)
+    return {
+        "location": location,
+        "account_created_at": created,
+        "username_history": history,
+        "tiktok_creator_level": creator_level,
+    }
+
+
 def _from_rehydration(data: dict[str, Any]) -> dict[str, Any] | None:
     scope = data.get("__DEFAULT_SCOPE__") or {}
     detail = scope.get("webapp.user-detail")
@@ -78,7 +234,7 @@ def _from_rehydration(data: dict[str, Any]) -> dict[str, Any] | None:
     if not user:
         return None
     username = user.get("uniqueId")
-    return {
+    out = {
         "username": username,
         "display_name": user.get("nickname"),
         "user_id": str(user["id"]) if user.get("id") is not None else None,
@@ -94,6 +250,8 @@ def _from_rehydration(data: dict[str, Any]) -> dict[str, Any] | None:
         "profile_url": f"https://www.tiktok.com/@{username}" if username else None,
         "parse_method": "rehydration",
     }
+    out.update(_extended_from_user(user, user_info=user_info))
+    return out
 
 
 def _from_sigi(data: dict[str, Any]) -> dict[str, Any] | None:
@@ -110,7 +268,7 @@ def _from_sigi(data: dict[str, Any]) -> dict[str, Any] | None:
     stats: dict[str, Any] = {}
     if isinstance(stats_mod, dict) and username and username in stats_mod:
         stats = stats_mod[username] if isinstance(stats_mod[username], dict) else {}
-    return {
+    out = {
         "username": username,
         "display_name": user.get("nickname"),
         "user_id": str(user["id"]) if user.get("id") is not None else None,
@@ -126,6 +284,8 @@ def _from_sigi(data: dict[str, Any]) -> dict[str, Any] | None:
         "profile_url": f"https://www.tiktok.com/@{username}" if username else None,
         "parse_method": "sigi_state",
     }
+    out.update(_extended_from_user(user))
+    return out
 
 
 def _from_meta(html: str, username: str) -> dict[str, Any]:
@@ -154,6 +314,10 @@ def _from_meta(html: str, username: str) -> dict[str, Any]:
         "video_count": None,
         "profile_url": profile_url_for(username),
         "parse_method": "meta_tags",
+        "location": None,
+        "account_created_at": None,
+        "username_history": None,
+        "tiktok_creator_level": None,
     }
 
 
@@ -179,7 +343,8 @@ def lookup(username_or_url: str, *, session=None, timeout: float = 25.0) -> dict
     Look up a public TikTok profile.
 
     Returns public fields only: username, display name, bio, follower/following/likes
-    counts when present in page JSON, profile URL, id if public.
+    counts when present in page JSON, profile URL, id if public, plus extended
+    public fields (location/region, createTime, creator level) when present.
     """
     username = normalize_username(username_or_url)
     url = profile_url_for(username)
@@ -209,10 +374,26 @@ def lookup(username_or_url: str, *, session=None, timeout: float = 25.0) -> dict
     if not parsed.get("username") and not parsed.get("user_id") and not parsed.get("display_name"):
         result["error"] = "profile not found or page blocked public scrape"
         result.update(parsed)
+        apply_extended_fields(
+            result,
+            location=parsed.get("location"),
+            account_created_at=parsed.get("account_created_at"),
+            username_history=parsed.get("username_history"),
+            tiktok_creator_level=parsed.get("tiktok_creator_level"),
+            platform="tiktok",
+        )
         return result
 
     result["found"] = True
     result.update(parsed)
+    apply_extended_fields(
+        result,
+        location=parsed.get("location"),
+        account_created_at=parsed.get("account_created_at"),
+        username_history=parsed.get("username_history"),
+        tiktok_creator_level=parsed.get("tiktok_creator_level"),
+        platform="tiktok",
+    )
     if not result.get("profile_url"):
         result["profile_url"] = url
     result["error"] = None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -82,6 +83,88 @@ def fetch_html(
             session.close()
 
 
+def unix_to_iso(ts: Any) -> str | None:
+    """Convert a unix timestamp (int/float/str) to ISO-8601 UTC, or None."""
+    if ts is None or ts == "":
+        return None
+    try:
+        value = float(ts)
+    except (TypeError, ValueError):
+        return None
+    # Heuristic: ms vs seconds
+    if value > 1e12:
+        value = value / 1000.0
+    if value <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def availability_flag(value: Any, *, na: bool = False) -> str:
+    if na:
+        return "n/a"
+    return "available" if value is not None else "unavailable"
+
+
+def build_field_availability(
+    *,
+    location: Any = None,
+    account_created_at: Any = None,
+    username_history: Any = None,
+    tiktok_creator_level: Any = None,
+    platform: str | None = None,
+) -> dict[str, str]:
+    """Mark which extended public fields were present in the payload."""
+    is_tiktok = (platform or "").lower() == "tiktok"
+    return {
+        "location": availability_flag(location),
+        "account_created_at": availability_flag(account_created_at),
+        "username_history": availability_flag(username_history),
+        "tiktok_creator_level": availability_flag(
+            tiktok_creator_level, na=not is_tiktok
+        ),
+    }
+
+
+def extended_field_defaults(platform: str) -> dict[str, Any]:
+    """Null-filled extended fields + field_availability for a platform."""
+    return {
+        "location": None,
+        "account_created_at": None,
+        "username_history": None,
+        "tiktok_creator_level": None,
+        "field_availability": build_field_availability(platform=platform),
+    }
+
+
+def apply_extended_fields(
+    result: dict[str, Any],
+    *,
+    location: Any = None,
+    account_created_at: Any = None,
+    username_history: Any = None,
+    tiktok_creator_level: Any = None,
+    platform: str | None = None,
+) -> dict[str, Any]:
+    """Set extended OSINT fields and recompute field_availability."""
+    plat = platform or result.get("platform") or ""
+    is_tiktok = str(plat).lower() == "tiktok"
+    result["location"] = location
+    result["account_created_at"] = account_created_at
+    result["username_history"] = username_history
+    result["tiktok_creator_level"] = tiktok_creator_level if is_tiktok else None
+    result["field_availability"] = build_field_availability(
+        location=result["location"],
+        account_created_at=result["account_created_at"],
+        username_history=result["username_history"],
+        tiktok_creator_level=result["tiktok_creator_level"],
+        platform=plat,
+    )
+    return result
+
+
 def base_result(
     platform: str,
     query: str,
@@ -90,7 +173,7 @@ def base_result(
     error: str | None = None,
 ) -> dict[str, Any]:
     """Skeleton dict shared by all platform modules."""
-    return {
+    out: dict[str, Any] = {
         "platform": platform,
         "query": query,
         "profile_url": profile_url,
@@ -99,3 +182,5 @@ def base_result(
         "source": "public_html",
         "fetched_at": None,
     }
+    out.update(extended_field_defaults(platform))
+    return out

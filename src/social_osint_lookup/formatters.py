@@ -20,8 +20,13 @@ _LABELS = [
     ("bio", "Bio"),
     ("about", "About"),
     ("external_url", "External URL"),
+    ("location", "Location"),
+    ("account_created_at", "Created at"),
+    ("username_history", "Username history"),
+    ("tiktok_creator_level", "TikTok creator level"),
     ("verified", "Verified"),
     ("private", "Private"),
+    ("protected", "Protected"),
     ("business", "Business"),
     ("entity_type", "Type"),
     ("follower_count", "Followers"),
@@ -32,11 +37,27 @@ _LABELS = [
     ("profile_url", "Profile URL"),
     ("avatar_url", "Avatar"),
     ("parse_method", "Parse method"),
+    ("field_availability", "Field availability"),
     ("http_status", "HTTP"),
     ("final_url", "Final URL"),
     ("error", "Error"),
     ("fetched_at", "Fetched at"),
 ]
+
+
+def _fmt_history(val: Any) -> str:
+    if not isinstance(val, list):
+        return str(val)
+    parts = []
+    for item in val:
+        if isinstance(item, dict):
+            u = item.get("username", "?")
+            ca = item.get("changed_at") or "—"
+            loc = item.get("location_at_change") or "—"
+            parts.append(f"{u} (changed_at={ca}, location_at_change={loc})")
+        else:
+            parts.append(str(item))
+    return "; ".join(parts)
 
 
 def to_pretty(data: dict[str, Any]) -> str:
@@ -51,6 +72,10 @@ def to_pretty(data: dict[str, Any]) -> str:
             continue
         if key == "found":
             val = "yes" if val else "no"
-        lines.append(f"  {label:14} {val}")
+        elif key == "username_history":
+            val = _fmt_history(val)
+        elif key == "field_availability" and isinstance(val, dict):
+            val = ", ".join(f"{k}={v}" for k, v in val.items())
+        lines.append(f"  {label:22} {val}")
     lines.append("")
     return "\n".join(lines)

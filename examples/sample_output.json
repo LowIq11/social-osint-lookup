@@ -15,8 +15,24 @@
       "following_count": 56,
       "likes_count": 7890,
       "video_count": 12,
+      "location": "US",
+      "account_created_at": "2021-01-01T00:00:00+00:00",
+      "username_history": [
+        {
+          "username": "old_example",
+          "changed_at": null,
+          "location_at_change": null
+        }
+      ],
+      "tiktok_creator_level": "level2",
       "profile_url": "https://www.tiktok.com/@example_user",
       "parse_method": "rehydration",
+      "field_availability": {
+        "location": "available",
+        "account_created_at": "available",
+        "username_history": "available",
+        "tiktok_creator_level": "available"
+      },
       "error": null
     },
     {
@@ -31,20 +47,42 @@
       "follower_count": 1000,
       "following_count": 100,
       "post_count": 42,
+      "location": null,
+      "account_created_at": null,
+      "username_history": null,
+      "tiktok_creator_level": null,
       "profile_url": "https://www.instagram.com/example_user/",
       "parse_method": "meta_tags",
+      "field_availability": {
+        "location": "unavailable",
+        "account_created_at": "unavailable",
+        "username_history": "unavailable",
+        "tiktok_creator_level": "n/a"
+      },
       "error": null
     },
     {
-      "platform": "facebook",
-      "query": "examplepage",
+      "platform": "x",
+      "query": "example_user",
       "found": true,
-      "username": "examplepage",
-      "display_name": "Example Page",
-      "about": "Official example page for documentation.",
-      "entity_type": "page",
-      "profile_url": "https://www.facebook.com/examplepage",
-      "parse_method": "meta_tags",
+      "username": "example_user",
+      "display_name": "Example User",
+      "bio": "Demo bio for docs",
+      "verified": false,
+      "follower_count": 5000,
+      "following_count": 100,
+      "location": "Austin, TX",
+      "account_created_at": "2020-01-01T00:00:00+00:00",
+      "username_history": null,
+      "tiktok_creator_level": null,
+      "profile_url": "https://x.com/example_user",
+      "parse_method": "next_data",
+      "field_availability": {
+        "location": "available",
+        "account_created_at": "available",
+        "username_history": "unavailable",
+        "tiktok_creator_level": "n/a"
+      },
       "error": null
     }
   ]

@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "social-osint-lookup"
-version = "0.1.0"
-description = "Public-profile OSINT lookup for TikTok, Instagram, and Facebook (educational / research)"
+version = "0.2.0"
+description = "Public-profile OSINT lookup for TikTok, Instagram, and X (Twitter) (educational / research)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "LowIq11" }]
-keywords = ["osint", "tiktok", "instagram", "facebook", "public-profile", "research"]
+keywords = ["osint", "tiktok", "instagram", "x", "twitter", "public-profile", "research"]
 dependencies = [
   "requests>=2.31",
   "beautifulsoup4>=4.12",

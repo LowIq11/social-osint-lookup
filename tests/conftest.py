@@ -21,10 +21,5 @@ def instagram_html(fixtures_dir: Path) -> str:
 
 
 @pytest.fixture
-def facebook_page_html(fixtures_dir: Path) -> str:
-    return (fixtures_dir / "facebook_page.html").read_text(encoding="utf-8")
-
-
-@pytest.fixture
-def facebook_profile_html(fixtures_dir: Path) -> str:
-    return (fixtures_dir / "facebook_profile.html").read_text(encoding="utf-8")
+def x_html(fixtures_dir: Path) -> str:
+    return (fixtures_dir / "x_profile.html").read_text(encoding="utf-8")

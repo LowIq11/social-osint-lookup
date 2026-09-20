@@ -27,6 +27,13 @@ def test_parse_rehydration(tiktok_html: str):
     assert parsed["private"] is False
     assert parsed["parse_method"] == "rehydration"
     assert parsed["profile_url"] == "https://www.tiktok.com/@demo_tiktok"
+    assert parsed["location"] == "US"
+    assert parsed["account_created_at"] == "2021-01-01T00:00:00+00:00"
+    assert parsed["tiktok_creator_level"] == "level2"
+    assert isinstance(parsed["username_history"], list)
+    assert parsed["username_history"][0]["username"] == "old_demo_tt"
+    assert parsed["username_history"][0]["changed_at"] == "2020-03-01T00:00:00+00:00"
+    assert parsed["username_history"][0]["location_at_change"] is None
 
 
 def test_lookup_mocked(tiktok_html: str):
@@ -45,3 +52,10 @@ def test_lookup_mocked(tiktok_html: str):
     assert result["username"] == "demo_tiktok"
     assert result["follower_count"] == 1500
     assert result["error"] is None
+    assert result["location"] == "US"
+    assert result["account_created_at"] == "2021-01-01T00:00:00+00:00"
+    assert result["tiktok_creator_level"] == "level2"
+    assert result["field_availability"]["location"] == "available"
+    assert result["field_availability"]["account_created_at"] == "available"
+    assert result["field_availability"]["username_history"] == "available"
+    assert result["field_availability"]["tiktok_creator_level"] == "available"

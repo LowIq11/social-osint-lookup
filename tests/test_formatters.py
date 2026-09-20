@@ -17,6 +17,11 @@ def test_to_pretty_contains_labels():
         "username": "demo",
         "display_name": "Demo",
         "follower_count": 10,
+        "location": "NYC",
+        "account_created_at": None,
+        "username_history": [
+            {"username": "old_demo", "changed_at": None, "location_at_change": None}
+        ],
         "error": None,
     }
     text = to_pretty(data)
@@ -25,3 +30,6 @@ def test_to_pretty_contains_labels():
     assert "demo" in text
     assert "Found" in text
     assert "yes" in text
+    assert "Location" in text
+    assert "Username history" in text
+    assert "old_demo" in text
