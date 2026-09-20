@@ -1,0 +1,51 @@
+{
+  "note": "Sanitized fictional example — not a real person. Shows output shape only.",
+  "results": [
+    {
+      "platform": "tiktok",
+      "query": "example_user",
+      "found": true,
+      "username": "example_user",
+      "display_name": "Example User",
+      "user_id": "0000000000000000000",
+      "bio": "Demo bio for docs",
+      "verified": false,
+      "private": false,
+      "follower_count": 1234,
+      "following_count": 56,
+      "likes_count": 7890,
+      "video_count": 12,
+      "profile_url": "https://www.tiktok.com/@example_user",
+      "parse_method": "rehydration",
+      "error": null
+    },
+    {
+      "platform": "instagram",
+      "query": "example_user",
+      "found": true,
+      "username": "example_user",
+      "display_name": "Example User",
+      "bio": "Demo bio for docs",
+      "verified": false,
+      "private": false,
+      "follower_count": 1000,
+      "following_count": 100,
+      "post_count": 42,
+      "profile_url": "https://www.instagram.com/example_user/",
+      "parse_method": "meta_tags",
+      "error": null
+    },
+    {
+      "platform": "facebook",
+      "query": "examplepage",
+      "found": true,
+      "username": "examplepage",
+      "display_name": "Example Page",
+      "about": "Official example page for documentation.",
+      "entity_type": "page",
+      "profile_url": "https://www.facebook.com/examplepage",
+      "parse_method": "meta_tags",
+      "error": null
+    }
+  ]
+}

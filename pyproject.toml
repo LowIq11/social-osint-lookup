@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "social-osint-lookup"
+version = "0.1.0"
+description = "Public-profile OSINT lookup for TikTok, Instagram, and Facebook (educational / research)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "LowIq11" }]
+keywords = ["osint", "tiktok", "instagram", "facebook", "public-profile", "research"]
+dependencies = [
+  "requests>=2.31",
+  "beautifulsoup4>=4.12",
+  "fake-useragent>=1.5",
+  "click>=8.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "responses>=0.25"]
+
+[project.scripts]
+social-osint-lookup = "social_osint_lookup.cli:main"
+sol = "social_osint_lookup.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/LowIq11/social-osint-lookup"
+Repository = "https://github.com/LowIq11/social-osint-lookup"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
