@@ -26,6 +26,19 @@ python -m social_osint_lookup instagram nasa
 - **No Wayback / archive scraping** for username history. History is only
   returned when a public profile payload actually contains prior handles.
 
+
+## Notes on TikTok parsing
+
+TikTok's public profile HTML embeds `__UNIVERSAL_DATA_FOR_REHYDRATION__`. This tool
+parses that SSR JSON (not a thin stats-only endpoint). If compressed responses are
+not decoded (e.g. Brotli without the `brotli` package), the page looks empty and
+fields fall back to null — `brotli` is now a dependency so decoding works.
+
+Fields such as bio, location, username history, and creator badge are returned
+**only when present in that public payload**. Empty bios and missing region /
+history / badge keys stay `null` with `field_availability: unavailable` — we do
+not invent values that a logged-in or app-only UI might show.
+
 ## Install
 
 ```bash

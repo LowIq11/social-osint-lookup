@@ -20,6 +20,15 @@ DEFAULT_UA = (
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
+def _accept_encoding() -> str:
+    """Return Accept-Encoding listing only codecs we can actually decode."""
+    try:
+        import brotli  # noqa: F401
+    except Exception:  # noqa: BLE001
+        return "gzip, deflate"
+    return "gzip, deflate, br"
+
+
 # Minimum seconds between requests from this process (polite default).
 _MIN_INTERVAL = 1.25
 _last_request_at = 0.0
@@ -49,7 +58,10 @@ def make_session(*, extra_headers: dict[str, str] | None = None) -> requests.Ses
         "User-Agent": get_user_agent(),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
+        # Prefer encodings requests always decodes. Include br only when
+        # the brotli package is installed — otherwise TikTok returns opaque
+        # compressed bytes and we fall back to empty meta-only parses.
+        "Accept-Encoding": _accept_encoding(),
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
     }

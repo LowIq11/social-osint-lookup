@@ -71,8 +71,20 @@ def _extract_json_script(html: str, pattern: re.Pattern[str]) -> dict[str, Any] 
 
 
 def _extract_location(user: dict[str, Any]) -> str | None:
-    """Prefer human-readable region/location keys when present in public JSON."""
-    for key in ("region", "location", "isoCountryCode", "country", "storeRegion"):
+    """Prefer human-readable region/location keys when present in public JSON.
+
+    Note: TikTok's public `language` field is UI locale, not a geographic
+    location — never treat it as location.
+    """
+    for key in (
+        "region",
+        "location",
+        "isoCountryCode",
+        "country",
+        "storeRegion",
+        "regionName",
+        "accountRegion",
+    ):
         val = user.get(key)
         if isinstance(val, str) and val.strip():
             return val.strip()
@@ -128,7 +140,7 @@ def _extract_username_history(user: dict[str, Any]) -> list[dict[str, Any]] | No
             }
         )
 
-    for key in ("uniqueIdHistory", "uniqueIdHistories", "previousUniqueIds", "nicknames"):
+    for key in ("uniqueIdHistory", "uniqueIdHistories", "previousUniqueIds", "nicknames", "usernameHistory", "handleHistory"):
         val = user.get(key)
         if isinstance(val, list) and val:
             for item in val:
@@ -180,6 +192,9 @@ def _extract_creator_level(user: dict[str, Any], user_info: dict[str, Any] | Non
             "support_level",
             "engagementLevel",
             "badgeLevel",
+            "creatorBadge",
+            "profileBadge",
+            "analyticsLevel",
             "level",
         ):
             val = scope.get(key)
@@ -231,25 +246,50 @@ def _from_rehydration(data: dict[str, Any]) -> dict[str, Any] | None:
         return None
     user = user_info.get("user") if isinstance(user_info.get("user"), dict) else {}
     stats = user_info.get("stats") if isinstance(user_info.get("stats"), dict) else {}
+    stats_v2 = user_info.get("statsV2") if isinstance(user_info.get("statsV2"), dict) else {}
     if not user:
         return None
-    username = user.get("uniqueId")
+
+    def _stat(*keys: str) -> Any:
+        for key in keys:
+            if key in stats and stats.get(key) is not None:
+                return stats.get(key)
+            if key in stats_v2 and stats_v2.get(key) is not None:
+                val = stats_v2.get(key)
+                # statsV2 sometimes stores counts as strings
+                if isinstance(val, str) and val.isdigit():
+                    return int(val)
+                return val
+        return None
+
+    username = user.get("uniqueId") or user.get("unique_id")
     out = {
         "username": username,
-        "display_name": user.get("nickname"),
+        "display_name": user.get("nickname") or user.get("nickName"),
         "user_id": str(user["id"]) if user.get("id") is not None else None,
-        "sec_uid": user.get("secUid"),
-        "bio": user.get("signature") or None,
+        "sec_uid": user.get("secUid") or user.get("sec_uid"),
+        "bio": (user.get("signature") or user.get("bio") or None) or None,
         "verified": user.get("verified") if "verified" in user else None,
-        "private": user.get("privateAccount") if "privateAccount" in user else None,
-        "avatar_url": user.get("avatarLarger") or user.get("avatarMedium") or user.get("avatarThumb"),
-        "follower_count": stats.get("followerCount"),
-        "following_count": stats.get("followingCount"),
-        "likes_count": stats.get("heartCount", stats.get("heart")),
-        "video_count": stats.get("videoCount"),
+        "private": user.get("privateAccount")
+        if "privateAccount" in user
+        else user.get("private") if "private" in user else None,
+        "avatar_url": (
+            user.get("avatarLarger")
+            or user.get("avatarMedium")
+            or user.get("avatarThumb")
+            or user.get("avatarLarger")
+            or user.get("avatarMedium")
+        ),
+        "follower_count": _stat("followerCount", "follower_count"),
+        "following_count": _stat("followingCount", "following_count"),
+        "likes_count": _stat("heartCount", "heart", "diggCount"),
+        "video_count": _stat("videoCount", "video_count"),
         "profile_url": f"https://www.tiktok.com/@{username}" if username else None,
         "parse_method": "rehydration",
     }
+    # Empty bio string -> None
+    if isinstance(out.get("bio"), str) and not out["bio"].strip():
+        out["bio"] = None
     out.update(_extended_from_user(user, user_info=user_info))
     return out
 
