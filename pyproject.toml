@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "social-osint-lookup"
-version = "0.2.1"
+version = "0.3.0"
 description = "Public-profile OSINT lookup for TikTok, Instagram, and X (Twitter) (educational / research)"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -499,23 +499,44 @@ def lookup(
     session=None,
     timeout: float = 25.0,
     session_cookie: str | None = None,
+    prefer_api: bool = True,
 ) -> dict[str, Any]:
     """
-    Look up a TikTok profile from public HTML (optionally with a session cookie).
+    Look up a TikTok profile.
 
-    Without a cookie: unauthenticated public scrape only.
+    Default path: try independent webapp/mobile API fetcher
+    (``tiktok_mobile.lookup_profile`` — no Omar). If that returns no user
+    object (typical without X-Gorgon / mssdk signing), fall back to public
+    HTML rehydration.
+
     With ``session_cookie`` or env ``TIKTOK_SESSION_COOKIE``: Cookie header is
-    attached so richer fields may appear in the same rehydration JSON when TikTok
+    attached on the HTML fallback so richer fields may appear when TikTok
     exposes them to logged-in browsers. The cookie is never logged, printed, or
     written to disk by this library.
 
     Always returns last-modify timestamps (uniqueIdModifyTime / nickNameModifyTime)
     when present; full history arrays only when actually in the payload.
     """
+    # --- Primary: Omar-free API probes (multi-host, cached, signed-params gap) ---
+    if prefer_api and not session_cookie:
+        try:
+            from social_osint_lookup.platforms import tiktok_mobile
+
+            api_result = tiktok_mobile.lookup_profile(
+                username_or_url, session=session, timeout=timeout
+            )
+            if api_result and api_result.get("found"):
+                api_result.setdefault("fetcher", "tiktok_mobile")
+                return api_result
+        except Exception:
+            # Soft-fail into HTML fallback; never break CLI on API probe errors.
+            pass
+
     username = normalize_username(username_or_url)
     url = profile_url_for(username)
     result = base_result("tiktok", username_or_url, profile_url=url)
     result["fetched_at"] = datetime.now(timezone.utc).isoformat()
+    result["fetcher"] = "html_rehydration"
 
     cookie = resolve_tiktok_session_cookie(session_cookie)
     result["auth_mode"] = "session_cookie" if cookie else "public"

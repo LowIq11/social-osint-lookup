@@ -160,9 +160,16 @@ def test_lookup_public_auth_mode_without_cookie(tiktok_html: str):
     mock_resp.url = "https://www.tiktok.com/@demo_tiktok"
 
     with patch(
+        "social_osint_lookup.platforms.tiktok_mobile.lookup_profile",
+        return_value=None,
+    ), patch(
+        "social_osint_lookup.platforms.tiktok.resolve_tiktok_session_cookie",
+        return_value=None,
+    ), patch(
         "social_osint_lookup.platforms.tiktok.fetch_html",
         return_value=(tiktok_html, mock_resp),
     ):
         result = tiktok.lookup("demo_tiktok")
 
     assert result["auth_mode"] == "public"
+    assert result.get("fetcher") == "html_rehydration"

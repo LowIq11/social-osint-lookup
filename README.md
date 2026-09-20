@@ -27,6 +27,30 @@ python -m social_osint_lookup instagram nasa
   returned when a public profile payload actually contains prior handles.
 
 
+
+## TikTok fetchers (Omar-free)
+
+Default order for `social-osint-lookup tiktok …`:
+
+1. **`tiktok_mobile`** — probes TikTok webapp + aweme detail hosts directly
+   (multi-region URL list, short TTL cache, rotated device ids / UAs).
+   No omar-thing seal/worker/paid API.
+2. **HTML rehydration fallback** — `GET https://www.tiktok.com/@user` and parse
+   `__UNIVERSAL_DATA_FOR_REHYDRATION__` (optionally with `TIKTOK_SESSION_COOKIE`).
+
+### Discovered TikTok endpoints
+
+| Endpoint | Result without signing |
+|----------|------------------------|
+| `GET https://www.tiktok.com/@{user}` | Works (SSR JSON) |
+| `GET https://www.tiktok.com/oembed?url=…` | Works (name/url only) |
+| `GET https://www.tiktok.com/api/user/detail/` | 200 empty / empty `userInfo` (needs mssdk / X-Bogus) |
+| `GET https://api16-normal-c-useast1a.tiktokv.com/aweme/v1/user/detail/` (+ api19/api22) | 200 `"url doesn't match"` (needs X-Gorgon / X-Khronos) |
+| Follower/following list aweme/web endpoints | Unavailable without login+signing |
+
+This library does **not** ship a working X-Gorgon / mssdk signer. When API probes
+return no user object, the HTML scraper runs automatically.
+
 ## Notes on TikTok parsing
 
 TikTok's public profile HTML embeds `__UNIVERSAL_DATA_FOR_REHYDRATION__`. This tool
